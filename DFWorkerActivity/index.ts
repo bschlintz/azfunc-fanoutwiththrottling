@@ -1,7 +1,7 @@
 ﻿import { AzureFunction, Context } from "@azure/functions"
 import { IWorkerActivityOutput } from "../shared/models/IWorkerActivityOutput";
 import { WorkItemStatus } from "../shared/models/IWorkItem";
-import { addMinutes } from "date-fns";
+import { addSeconds } from "date-fns";
 import * as faker from "faker";
 import { IWorkerActivityInput } from "../shared/models/IWorkerActivityInput";
 
@@ -9,41 +9,39 @@ const activityFunction: AzureFunction = async function (context: Context): Promi
     const input: IWorkerActivityInput = context.bindings.input;
     let output: IWorkerActivityOutput = null;
 
-    //Fake an async call that takes between 0-5 seconds
-    await fakeAsyncCall((Math.random() * 5) * 1000) 
+    //Fake an async call that takes between 0-1 seconds
+    await fakeAsyncCall((Math.random() * 1) * 1000) 
 
-    //10% of the time, return Throttle status
-    if (Math.random() < 0.10) {
+    //5% of the time, return Throttle status, pause for 20 seconds
+    if (Math.random() < 0.15) {
         output = {
             ...input.workItem,
             status: WorkItemStatus.Throttled,
-            throttledUntilDate: addMinutes(new Date(), 2)
+            retryAfterDateString: addSeconds(new Date(), 20).toISOString()
         }
     }
-
-    //2% of the time, return Failed status
-    if (Math.random() < 0.02) {
+    //5% of the time, return Failed status
+    else if (Math.random() < 0.05) {
         output = {
             ...input.workItem,
             status: WorkItemStatus.Failed
         }
-    }
-    
+    }    
     //OK, return Complete status
-    output = {
+    else output = {
         ...input.workItem,
         status: WorkItemStatus.Complete,
         result: faker.random.words()
     }   
 
     if (output.status === WorkItemStatus.Complete) {
-        console.log(`[${output.id}] [COMPLETE] ${output.result}`);
+        context.log(`[${output.id}] [COMPLETE] ${output.result}`);
     }
     else if (output.status === WorkItemStatus.Throttled) {
-        console.log(`[${output.id}] [THROTTLED] Sleep until ${output.throttledUntilDate}`);
+        context.log(`[${output.id}] [THROTTLED] Sleep until ${output.retryAfterDateString}`);
     }
     else if (output.status === WorkItemStatus.Failed) {
-        console.log(`[${output.id}] [FAILED]`);
+        context.log(`[${output.id}] [FAILED]`);
     }
 
     return output;

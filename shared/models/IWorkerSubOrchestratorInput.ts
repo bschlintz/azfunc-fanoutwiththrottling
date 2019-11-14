@@ -1,5 +1,5 @@
 import { IWorkItem } from "./IWorkItem";
 
-export interface IGetWorkItemsOutput {
+export interface IWorkerSubOrchestratorInput {
     workItems: IWorkItem[];
 }

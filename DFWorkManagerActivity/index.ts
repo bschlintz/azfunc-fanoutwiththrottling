@@ -1,12 +1,11 @@
 ﻿import { AzureFunction, Context } from "@azure/functions"
-import { IGetWorkItemsInput } from "../shared/models/IGetWorkItemsInput";
-import { IGetWorkItemsOutput } from "../shared/models/IGetWorkItemsOutput";
-// import { v4 as uuid } from "uuid";
+import { IWorkManagerInput } from "../shared/models/IWorkManagerInput";
+import { IWorkManagerOutput } from "../shared/models/IWorkManagerOutput";
 import { IWorkItem, WorkItemStatus } from "../shared/models/IWorkItem";
 
-const activityFunction: AzureFunction = async function (context: Context): Promise<IGetWorkItemsOutput> {
-    const input: IGetWorkItemsInput = context.bindings.input;
-    let output: IGetWorkItemsOutput = {
+const activityFunction: AzureFunction = async function (context: Context): Promise<IWorkManagerOutput> {
+    const input: IWorkManagerInput = context.bindings.input;
+    let output: IWorkManagerOutput = {
         workItems: []
     };
 
