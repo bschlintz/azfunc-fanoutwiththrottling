@@ -1,78 +1,89 @@
 ﻿import * as df from "durable-functions"
 import { IWorkManagerInput } from "../shared/models/IWorkManagerInput";
-import { IWorkerActivityOutput } from "../shared/models/IWorkerActivityOutput";
 import { IWorkManagerOutput } from "../shared/models/IWorkManagerOutput";
 import { IWorkerSubOrchestratorOutput } from "../shared/models/IWorkerSubOrchestratorOutput";
 import { IWorkItem } from "../shared/models/IWorkItem";
 import { IWorkerSubOrchestratorInput } from "../shared/models/IWorkerSubOrchestratorInput";
-import { parseISO, isAfter, isBefore } from "date-fns";
+import { parseISO } from "date-fns";
 
 const SUBORCHESTRATOR_INSTANCE_ID = 'WORKER-SUBORCHESTRATOR';
-const BATCH_MULTIPLIER = 2;
-const MAX_BATCH_SIZE = 32;
-const MIN_BATCH_SIZE = 1;
+const BATCH_MULTIPLIER = 4;
+const MAX_BATCH_SIZE = 128;
+const MIN_BATCH_SIZE = 2;
 
 const orchestrator = df.orchestrator(function* (context) {
-    // let outputs = [];
-
-    const workManagerInput: IWorkManagerInput = { mode: 'Incremental' };
+    const workManagerInput: IWorkManagerInput = { mode: 'Full' };
     const workManagerOutput: IWorkManagerOutput = yield context.df.callActivity("DFWorkManagerActivity", workManagerInput);
-
-    // for (let idx = 0; idx < workManagerOutput.workItems.length; idx++) {
-    //     const workItem = workManagerOutput.workItems[idx];
-    //     const workerOutput: IWorkerActivityOutput = yield context.df.callActivity("DFWorkerActivity", { workItem });
-    //     outputs.push(workerOutput);
-    // }
 
     // Set Initial Batch Size
     let BATCH_SIZE = MIN_BATCH_SIZE;
     let BATCH: IWorkItem[] = [];
+    let LAST_BATCH_FAILED = false;
 
-    for (let idx = 0; idx < workManagerOutput.workItems.length; idx++) {
-        const executeBatch = (idx % BATCH_SIZE) === 0 || (idx + 1) === workManagerOutput.workItems.length;
+    for (let idx = 0; idx < workManagerOutput.workItems.length || BATCH.length > 0; idx++) {
         const workItem = workManagerOutput.workItems[idx];
-
-        if (BATCH.length < BATCH_SIZE) {
-            BATCH.push(workItem);
-        }
+        if (workItem) BATCH.push(workItem);
+        
+        // EXECUTE IF: Last Batch Failed -OR- Hit Batch Limit -OR- Hit Last Work Item
+        const executeBatch = LAST_BATCH_FAILED || (BATCH.length % BATCH_SIZE) === 0 || (idx + 1) === workManagerOutput.workItems.length;
 
         if (executeBatch) {
-            const subOrchestratorInput: IWorkerSubOrchestratorInput = {
+            const batchInput: IWorkerSubOrchestratorInput = {
                 workItems: BATCH
             }            
-            const subOrchestratorOutput: IWorkerSubOrchestratorOutput = yield context.df.callSubOrchestrator("DFWorkerSubOrchestrator", subOrchestratorInput, SUBORCHESTRATOR_INSTANCE_ID);
+            const batchOutput: IWorkerSubOrchestratorOutput = yield context.df.callSubOrchestrator(
+                "DFWorkerSubOrchestrator", batchInput, SUBORCHESTRATOR_INSTANCE_ID
+            );
+
+            // CLEAR BATCH ARRAY
+            BATCH = [];
 
             // SUCCESS
-            if (subOrchestratorOutput.success) {
-                BATCH = [];
-                BATCH_SIZE = (BATCH_SIZE >= MAX_BATCH_SIZE) ? BATCH_SIZE : BATCH_SIZE * BATCH_MULTIPLIER;
+            if (batchOutput.success) {
+                BATCH_SIZE = incrementBatchSize(BATCH_SIZE);
+                LAST_BATCH_FAILED = false;
             }
             // AT LEAST ONE FAILED OR THROTTLED
             else {
-                BATCH = [];
-
+                
                 //THROTTLED - GO TO SLEEP UNTIL RETRY-AFTER DATE
-                if (subOrchestratorOutput.retryAfterDateString) {
-                    const retryAfter = parseISO(subOrchestratorOutput.retryAfterDateString);
-                    if (isBefore(context.df.currentUtcDateTime, retryAfter)) {
-                        context.log(`------ [${context.executionContext.functionName}] [THROTTLED] [SLEEP UNTIL ==> ${subOrchestratorOutput.retryAfterDateString}]`);
-                    }
+                if (batchOutput.retryAfterDateString) {
+                    const retryAfter = parseISO(batchOutput.retryAfterDateString);
                     yield context.df.createTimer(retryAfter);
                 }
+                
+                BATCH_SIZE = resetBatchSize();
+                LAST_BATCH_FAILED = true;
 
-                //CHECK FAILED
-                if (subOrchestratorOutput.failedWorkItems && subOrchestratorOutput.failedWorkItems.length > 0) {
-                    BATCH.push(...subOrchestratorOutput.failedWorkItems);
+                //CHECK FAILED - RE-ADD FAILED TO BATCH ARRAY
+                if (batchOutput.failedWorkItems && batchOutput.failedWorkItems.length > 0) {
+                    BATCH.push(...batchOutput.failedWorkItems);
                 }
 
-                //CHECK THROTTLED
-                if (subOrchestratorOutput.throttledWorkItems && subOrchestratorOutput.throttledWorkItems.length > 0) {
-                    BATCH.push(...subOrchestratorOutput.throttledWorkItems);
-                    BATCH_SIZE = BATCH.length;
+                //CHECK THROTTLED - RE-ADD THROTTLED TO BATCH ARRAY
+                if (batchOutput.throttledWorkItems && batchOutput.throttledWorkItems.length > 0) {
+                    BATCH.push(...batchOutput.throttledWorkItems);
                 }
             }
         }
     }
 });
+
+const incrementBatchSize = (current: number): number => {
+    let batchSize = current;
+
+    if (batchSize < MAX_BATCH_SIZE) {
+        batchSize = current * BATCH_MULTIPLIER;
+    }
+    else {
+        batchSize = MAX_BATCH_SIZE;
+    }
+
+    return batchSize;
+}
+
+const resetBatchSize = (): number => {
+    return MIN_BATCH_SIZE;
+}
 
 export default orchestrator;

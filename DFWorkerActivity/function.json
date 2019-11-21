@@ -4,6 +4,13 @@
       "name": "input",
       "type": "activityTrigger",
       "direction": "in"
+    },
+    {
+      "tableName": "Items",
+      "connection": "AzureWebJobsStorage",
+      "name": "TableStorage",
+      "type": "table",
+      "direction": "out"
     }
   ],
   "scriptFile": "../dist/DFWorkerActivity/index.js"

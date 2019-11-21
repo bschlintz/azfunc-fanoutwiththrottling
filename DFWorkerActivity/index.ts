@@ -12,12 +12,12 @@ const activityFunction: AzureFunction = async function (context: Context): Promi
     //Fake an async call that takes between 0-1 seconds
     await fakeAsyncCall((Math.random() * 1) * 1000) 
 
-    //5% of the time, return Throttle status, pause for 20 seconds
-    if (Math.random() < 0.15) {
+    //5% of the time, return Throttle status, pause for 3 seconds
+    if (Math.random() < 0.05) {
         output = {
             ...input.workItem,
             status: WorkItemStatus.Throttled,
-            retryAfterDateString: addSeconds(new Date(), 20).toISOString()
+            retryAfterDateString: addSeconds(new Date(), 3).toISOString()
         }
     }
     //5% of the time, return Failed status
@@ -28,11 +28,13 @@ const activityFunction: AzureFunction = async function (context: Context): Promi
         }
     }    
     //OK, return Complete status
-    else output = {
-        ...input.workItem,
-        status: WorkItemStatus.Complete,
-        result: faker.random.words()
-    }   
+    else {
+        output = {
+            ...input.workItem,
+            status: WorkItemStatus.Complete,
+            result: faker.random.words()
+        }
+    }
 
     if (output.status === WorkItemStatus.Complete) {
         context.log(`[${output.id}] [COMPLETE] ${output.result}`);
@@ -43,6 +45,16 @@ const activityFunction: AzureFunction = async function (context: Context): Promi
     else if (output.status === WorkItemStatus.Failed) {
         context.log(`[${output.id}] [FAILED]`);
     }
+
+    //Save Output to TableStorage
+    context.bindings.TableStorage = context.bindings.TableStorage || [];
+    context.bindings.TableStorage.push({
+        PartitionKey: "ITEM",
+        RowKey: `${output.id}-${context.invocationId}`,
+        Id: output.id,
+        Result: output.result,
+        Status: output.status
+    });
 
     return output;
 };
